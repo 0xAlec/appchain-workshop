@@ -14,3 +14,5 @@ docs/
 .env
 
 frontend/node_modules/
+frontend/.next
+frontend/next-env.d.ts
