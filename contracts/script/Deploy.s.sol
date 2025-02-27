@@ -3,8 +3,7 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
 import "../src/BattleRoyaleFactory.sol";
-import "../src/BotFactory.sol";
-import "../src/OffchainBot.sol";
+import "../src/BattleRoyale.sol";
 
 contract DeployScript is Script {
     function run() external {
@@ -16,12 +15,8 @@ contract DeployScript is Script {
         // Deploy the battle royale factory
         BattleRoyaleFactory battleRoyaleFactory = new BattleRoyaleFactory();
         
-        // Deploy the bot factory
-        BotFactory botFactory = new BotFactory();
-        
         // Log the addresses
         console.log("BattleRoyaleFactory deployed at:", address(battleRoyaleFactory));
-        console.log("BotFactory deployed at:", address(botFactory));
         
         // Deploy a sample game
         address gameAddress = battleRoyaleFactory.deployGame();
@@ -31,9 +26,12 @@ contract DeployScript is Script {
         address rewardsAddress = battleRoyaleFactory.getRewardsContract(gameAddress);
         console.log("Sample game rewards contract deployed at:", rewardsAddress);
         
-        // Deploy a sample bot
-        address botAddress = botFactory.deployBot();
-        console.log("Sample bot deployed at:", botAddress);
+        // Create a round with a long registration period (1000 blocks, ~4 hours on Base)
+        BattleRoyale game = BattleRoyale(gameAddress);
+        game.createRound(1000);
+        console.log("Created a round with 1000 blocks for registration");
+        console.log("Current round:", game.currentRound());
+        console.log("Registration deadline (block):", game.registrationDeadline());
         
         vm.stopBroadcast();
     }
