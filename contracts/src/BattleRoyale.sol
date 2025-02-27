@@ -23,16 +23,6 @@ contract BattleRoyale {
         uint256 health;
         uint256 lastActionBlock;
         bool isAlive;
-        bool actionSubmittedForBlock;
-    }
-    
-    // Pending action struct
-    struct PendingAction {
-        address player;
-        ActionType actionType;
-        Direction direction;
-        uint256 targetX;
-        uint256 targetY;
     }
     
     // Game configuration
@@ -41,7 +31,8 @@ contract BattleRoyale {
     uint256 public constant ATTACK_DAMAGE = 25;
     uint256 public constant DEFEND_REDUCTION = 10;
     uint256 public constant ATTACK_RANGE = 1;
-    uint256 public constant BLOCK_INTERVAL = 1; // 1 block interval for actions
+    uint256 public constant DAMAGE_ZONE_DAMAGE = 50; // Damage from being in the damage zone (half health)
+    uint256 public constant ZONE_SHRINK_INTERVAL = 15; // Zone shrinks every 15 seconds
     
     // Game state variables
     address public owner;
@@ -49,7 +40,8 @@ contract BattleRoyale {
     uint256 public currentRound;
     uint256 public gameStartBlock;
     uint256 public registrationDeadline;
-    uint256 public lastExecutedBlock;
+    uint256 public lastZoneShrinkTime;
+    uint256 public currentSafeZoneSize;
     address public winner;
     
     // Player tracking
@@ -57,8 +49,8 @@ contract BattleRoyale {
     mapping(uint256 => address[]) public roundPlayers; // round -> player addresses
     mapping(uint256 => mapping(uint256 => mapping(uint256 => address))) public positionToPlayer; // round -> x -> y -> player address
     
-    // Pending actions for the current block
-    PendingAction[] public pendingActions;
+    // Defending players in the current block
+    mapping(uint256 => mapping(uint256 => mapping(address => bool))) public isDefending; // round -> block -> player -> isDefending
     
     // Events
     event RoundCreated(uint256 indexed round, uint256 registrationDeadline);
@@ -69,9 +61,10 @@ contract BattleRoyale {
     event PlayerDefended(uint256 indexed round, address indexed player);
     event PlayerEliminated(uint256 indexed round, address indexed player);
     event GameEnded(uint256 indexed round, address indexed winner);
-    event ActionsExecuted(uint256 indexed round, uint256 indexed blockNumber, uint256 actionsCount);
-    event ActionSubmitted(uint256 indexed round, address indexed player, uint8 actionType);
+    event ActionExecuted(uint256 indexed round, address indexed player, uint8 actionType);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+    event ZoneShrunk(uint256 indexed round, uint256 newSafeZoneSize);
+    event PlayerDamagedByZone(uint256 indexed round, address indexed player, uint256 damage, uint256 remainingHealth);
     
     // Modifiers
     modifier onlyOwner() {
@@ -91,6 +84,11 @@ contract BattleRoyale {
     
     modifier onlyAlive() {
         require(players[currentRound][msg.sender].isAlive, "Player is eliminated");
+        _;
+    }
+    
+    modifier oneActionPerBlock() {
+        require(players[currentRound][msg.sender].lastActionBlock < block.number, "Already performed action in this block");
         _;
     }
     
@@ -144,8 +142,7 @@ contract BattleRoyale {
             y: y,
             health: INITIAL_HEALTH,
             lastActionBlock: 0,
-            isAlive: true,
-            actionSubmittedForBlock: false
+            isAlive: true
         });
         
         roundPlayers[currentRound].push(msg.sender);
@@ -162,119 +159,117 @@ contract BattleRoyale {
         
         gameState = GameState.ACTIVE;
         gameStartBlock = block.number;
-        lastExecutedBlock = block.number;
+        lastZoneShrinkTime = block.timestamp;
+        currentSafeZoneSize = MAP_SIZE; // Start with the full map as safe
         
         emit GameStarted(currentRound, gameStartBlock, roundPlayers[currentRound].length);
     }
     
     /**
-     * @dev Submit a move action for the next block execution
+     * @dev Move in a direction
      * @param _direction Direction to move (0=UP, 1=DOWN, 2=LEFT, 3=RIGHT)
      */
-    function submitMove(Direction _direction) external inState(GameState.ACTIVE) onlyRegistered onlyAlive {
-        Player storage player = players[currentRound][msg.sender];
-        require(!player.actionSubmittedForBlock, "Action already submitted for this block");
+    function move(Direction _direction) external inState(GameState.ACTIVE) onlyRegistered onlyAlive oneActionPerBlock {
+        // Check if it's time to shrink the zone
+        _checkAndShrinkZone();
         
-        // Add to pending actions
-        pendingActions.push(PendingAction({
-            player: msg.sender,
-            actionType: ActionType.MOVE,
-            direction: _direction,
-            targetX: 0,
-            targetY: 0
-        }));
+        // Execute move
+        _executeMove(msg.sender, _direction);
         
-        player.actionSubmittedForBlock = true;
+        // Apply damage to player if in damage zone
+        _applyZoneDamageToPlayer(msg.sender);
         
-        emit ActionSubmitted(currentRound, msg.sender, uint8(ActionType.MOVE));
+        // Check if game is over
+        _checkGameOver();
+        
+        emit ActionExecuted(currentRound, msg.sender, uint8(ActionType.MOVE));
     }
     
     /**
-     * @dev Submit an attack action for the next block execution
+     * @dev Attack a target
      * @param _targetX X coordinate of the target
      * @param _targetY Y coordinate of the target
      */
-    function submitAttack(uint256 _targetX, uint256 _targetY) external inState(GameState.ACTIVE) onlyRegistered onlyAlive {
-        Player storage player = players[currentRound][msg.sender];
-        require(!player.actionSubmittedForBlock, "Action already submitted for this block");
+    function attack(uint256 _targetX, uint256 _targetY) external inState(GameState.ACTIVE) onlyRegistered onlyAlive oneActionPerBlock {
+        // Check if it's time to shrink the zone
+        _checkAndShrinkZone();
         
-        // Add to pending actions
-        pendingActions.push(PendingAction({
-            player: msg.sender,
-            actionType: ActionType.ATTACK,
-            direction: Direction.UP, // Default, not used for attack
-            targetX: _targetX,
-            targetY: _targetY
-        }));
+        // Execute attack
+        _executeAttack(msg.sender, _targetX, _targetY);
         
-        player.actionSubmittedForBlock = true;
+        // Apply damage to player if in damage zone
+        _applyZoneDamageToPlayer(msg.sender);
         
-        emit ActionSubmitted(currentRound, msg.sender, uint8(ActionType.ATTACK));
+        // Check if game is over
+        _checkGameOver();
+        
+        emit ActionExecuted(currentRound, msg.sender, uint8(ActionType.ATTACK));
     }
     
     /**
-     * @dev Submit a defend action for the next block execution
+     * @dev Defend against attacks
      */
-    function submitDefend() external inState(GameState.ACTIVE) onlyRegistered onlyAlive {
-        Player storage player = players[currentRound][msg.sender];
-        require(!player.actionSubmittedForBlock, "Action already submitted for this block");
+    function defend() external inState(GameState.ACTIVE) onlyRegistered onlyAlive oneActionPerBlock {
+        // Check if it's time to shrink the zone
+        _checkAndShrinkZone();
         
-        // Add to pending actions
-        pendingActions.push(PendingAction({
-            player: msg.sender,
-            actionType: ActionType.DEFEND,
-            direction: Direction.UP, // Default, not used for defend
-            targetX: 0,
-            targetY: 0
-        }));
+        // Mark player as defending for this block
+        isDefending[currentRound][block.number][msg.sender] = true;
         
-        player.actionSubmittedForBlock = true;
+        // Update last action block
+        players[currentRound][msg.sender].lastActionBlock = block.number;
         
-        emit ActionSubmitted(currentRound, msg.sender, uint8(ActionType.DEFEND));
+        // Apply damage to player if in damage zone
+        _applyZoneDamageToPlayer(msg.sender);
+        
+        // Check if game is over
+        _checkGameOver();
+        
+        emit PlayerDefended(currentRound, msg.sender);
+        emit ActionExecuted(currentRound, msg.sender, uint8(ActionType.DEFEND));
     }
     
     /**
-     * @dev Execute all pending actions for the current block
+     * @dev Check if it's time to shrink the zone and do so if needed
      */
-    function executeActions() external inState(GameState.ACTIVE) {
-        require(block.number >= lastExecutedBlock + BLOCK_INTERVAL, "Not time to execute actions yet");
-        require(pendingActions.length > 0, "No pending actions to execute");
-        
-        // Shuffle the pending actions to ensure fairness
-        _shufflePendingActions();
-        
-        // Execute all pending actions
-        for (uint256 i = 0; i < pendingActions.length; i++) {
-            PendingAction memory action = pendingActions[i];
+    function _checkAndShrinkZone() internal {
+        if (block.timestamp >= lastZoneShrinkTime + ZONE_SHRINK_INTERVAL && currentSafeZoneSize > 2) {
+            currentSafeZoneSize -= 2; // Shrink by 2 units (1 from each side)
+            lastZoneShrinkTime = block.timestamp;
             
-            // Skip if player is no longer alive
-            if (!players[currentRound][action.player].isAlive) {
-                continue;
-            }
-            
-            if (action.actionType == ActionType.MOVE) {
-                _executeMove(action.player, action.direction);
-            } else if (action.actionType == ActionType.ATTACK) {
-                _executeAttack(action.player, action.targetX, action.targetY);
-            } else if (action.actionType == ActionType.DEFEND) {
-                _executeDefend(action.player);
-            }
+            emit ZoneShrunk(currentRound, currentSafeZoneSize);
+        }
+    }
+    
+    /**
+     * @dev Apply damage to a player if they are outside the safe zone
+     * @param _player Player address
+     */
+    function _applyZoneDamageToPlayer(address _player) internal {
+        Player storage player = players[currentRound][_player];
+        
+        if (!player.isAlive) {
+            return;
         }
         
-        // Reset for next block
-        uint256 actionsCount = pendingActions.length;
-        delete pendingActions;
-        lastExecutedBlock = block.number;
+        uint256 safeStart = (MAP_SIZE - currentSafeZoneSize) / 2;
+        uint256 safeEnd = safeStart + currentSafeZoneSize - 1;
         
-        // Reset action submitted flags
-        for (uint256 i = 0; i < roundPlayers[currentRound].length; i++) {
-            address playerAddr = roundPlayers[currentRound][i];
-            if (players[currentRound][playerAddr].isAlive) {
-                players[currentRound][playerAddr].actionSubmittedForBlock = false;
+        // Check if player is outside the safe zone
+        if (player.x < safeStart || player.x > safeEnd || player.y < safeStart || player.y > safeEnd) {
+            // Apply damage
+            if (player.health <= DAMAGE_ZONE_DAMAGE) {
+                player.health = 0;
+                player.isAlive = false;
+                positionToPlayer[currentRound][player.x][player.y] = address(0);
+                
+                emit PlayerEliminated(currentRound, _player);
+            } else {
+                player.health -= DAMAGE_ZONE_DAMAGE;
             }
+            
+            emit PlayerDamagedByZone(currentRound, _player, DAMAGE_ZONE_DAMAGE, player.health);
         }
-        
-        emit ActionsExecuted(currentRound, block.number, actionsCount);
     }
     
     /**
@@ -347,8 +342,8 @@ contract BattleRoyale {
         // Apply damage
         uint256 damage = ATTACK_DAMAGE;
         
-        // If target was defending in this block, reduce damage
-        if (target.lastActionBlock == block.number && _isDefending(targetAddr)) {
+        // If target is defending in this block, reduce damage
+        if (isDefending[currentRound][block.number][targetAddr]) {
             damage = damage > DEFEND_REDUCTION ? damage - DEFEND_REDUCTION : 0;
         }
         
@@ -362,55 +357,11 @@ contract BattleRoyale {
             positionToPlayer[currentRound][_targetX][_targetY] = address(0);
             
             emit PlayerEliminated(currentRound, targetAddr);
-            
-            // Check if game is over
-            _checkGameOver();
         } else {
             target.health -= damage;
         }
         
         emit PlayerAttacked(currentRound, _player, targetAddr, damage, target.health);
-    }
-    
-    /**
-     * @dev Execute a defend action
-     * @param _player Player address
-     */
-    function _executeDefend(address _player) internal {
-        Player storage player = players[currentRound][_player];
-        player.lastActionBlock = block.number;
-        
-        emit PlayerDefended(currentRound, _player);
-    }
-    
-    /**
-     * @dev Check if a player is defending in the current block
-     * @param _player Player address
-     * @return Whether the player is defending
-     */
-    function _isDefending(address _player) internal view returns (bool) {
-        for (uint256 i = 0; i < pendingActions.length; i++) {
-            if (pendingActions[i].player == _player && pendingActions[i].actionType == ActionType.DEFEND) {
-                return true;
-            }
-        }
-        return false;
-    }
-    
-    /**
-     * @dev Shuffle the pending actions array to ensure fairness
-     */
-    function _shufflePendingActions() internal {
-        uint256 n = pendingActions.length;
-        for (uint256 i = 0; i < n; i++) {
-            // Generate a random index
-            uint256 j = i + uint256(keccak256(abi.encodePacked(block.timestamp, block.prevrandao, i))) % (n - i);
-            
-            // Swap elements
-            PendingAction memory temp = pendingActions[i];
-            pendingActions[i] = pendingActions[j];
-            pendingActions[j] = temp;
-        }
     }
     
     /**
@@ -495,14 +446,76 @@ contract BattleRoyale {
     }
     
     /**
-     * @dev Get the time until the next action execution
-     * @return Number of blocks until next execution
+     * @dev Get the time until the next zone shrink
+     * @return Number of seconds until next zone shrink
      */
-    function getTimeUntilNextExecution() external view returns (uint256) {
-        if (block.number >= lastExecutedBlock + BLOCK_INTERVAL) {
+    function getTimeUntilNextZoneShrink() external view returns (uint256) {
+        if (block.timestamp >= lastZoneShrinkTime + ZONE_SHRINK_INTERVAL || currentSafeZoneSize <= 2) {
             return 0;
         }
-        return lastExecutedBlock + BLOCK_INTERVAL - block.number;
+        return lastZoneShrinkTime + ZONE_SHRINK_INTERVAL - block.timestamp;
+    }
+    
+    /**
+     * @dev Check if a position is in the damage zone
+     * @param _x X coordinate
+     * @param _y Y coordinate
+     * @return Whether the position is in the damage zone
+     */
+    function isInDamageZone(uint256 _x, uint256 _y) public view returns (bool) {
+        uint256 safeStart = (MAP_SIZE - currentSafeZoneSize) / 2;
+        uint256 safeEnd = safeStart + currentSafeZoneSize - 1;
+        
+        return _x < safeStart || _x > safeEnd || _y < safeStart || _y > safeEnd;
+    }
+    
+    /**
+     * @dev Get comprehensive game state for frontend
+     * @return A tuple containing:
+     * - gameState: Current game state (0=INACTIVE, 1=REGISTRATION, 2=ACTIVE, 3=COMPLETED)
+     * - currentRound: Current round number
+     * - safeZoneSize: Current size of the safe zone
+     * - safeZoneStart: Starting coordinate of the safe zone (same for x and y)
+     * - timeUntilNextZoneShrink: Seconds until next zone shrink
+     * - players: Array of all player data
+     * - currentBlock: The current block number
+     */
+    function getGameState() external view returns (
+        uint8,
+        uint256,
+        uint256,
+        uint256,
+        uint256,
+        Player[] memory,
+        uint256
+    ) {
+        // Calculate safe zone boundaries
+        uint256 safeZoneStart = (MAP_SIZE - currentSafeZoneSize) / 2;
+        
+        // Get time until next zone shrink
+        uint256 timeUntilShrink;
+        if (block.timestamp >= lastZoneShrinkTime + ZONE_SHRINK_INTERVAL || currentSafeZoneSize <= 2) {
+            timeUntilShrink = 0;
+        } else {
+            timeUntilShrink = lastZoneShrinkTime + ZONE_SHRINK_INTERVAL - block.timestamp;
+        }
+        
+        // Get all players
+        Player[] memory allPlayers = new Player[](roundPlayers[currentRound].length);
+        for (uint256 i = 0; i < roundPlayers[currentRound].length; i++) {
+            address playerAddr = roundPlayers[currentRound][i];
+            allPlayers[i] = players[currentRound][playerAddr];
+        }
+        
+        return (
+            uint8(gameState),
+            currentRound,
+            currentSafeZoneSize,
+            safeZoneStart,
+            timeUntilShrink,
+            allPlayers,
+            block.number
+        );
     }
     
     /**
