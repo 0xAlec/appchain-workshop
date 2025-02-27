@@ -13,8 +13,8 @@ export default function App() {
   const { players, alivePlayers } = useFetchPlayers();
   // Add state for player colors
   const [playerColors, setPlayerColors] = useState<Record<string, string>>({});
-  
-  // Add these new states
+
+  // Game state
   const [gameState, setGameState] = useState<number>(0); // 0=INACTIVE, 1=REGISTRATION, 2=ACTIVE, 3=COMPLETED
   const address = account.address;
   const [isRegistered, setIsRegistered] = useState(false);
@@ -265,7 +265,7 @@ export default function App() {
                   'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'}`}>
                 {gameState === 0 ? 'Inactive' : 
                  gameState === 1 ? 'Registration Open' : 
-                 gameState === 2 ? 'Game Active' : 'Game Completed'}
+                 gameState === 2 ? 'Active' : 'Completed'}
               </span>
             </div>
             <div className="text-sm mb-2">
