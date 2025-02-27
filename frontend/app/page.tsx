@@ -10,7 +10,7 @@ import { contractAddress } from './constants';
 export default function App() {
   // State to store the game map
   const [gameMap, setGameMap] = useState<string[][]>([]);
-  const { players, alivePlayers } = useFetchPlayers();
+  const [currentRound, setCurrentRound] = useState<number>(1);
 
   // Add state for player colors
   const [playerColors, setPlayerColors] = useState<Record<string, string>>({});
@@ -40,6 +40,17 @@ export default function App() {
     chainId: 8453200058,
   });
   
+  // Fetch current round from the contract
+  const { data: currentRoundData } = useReadContract({
+    address: contractAddress,
+    abi: battleRoyaleAbi,
+    functionName: 'currentRound',
+    chainId: 8453200058,
+  });
+  
+  // Pass the current round to useFetchPlayers
+  const { players, alivePlayers, refetch: refetchPlayers } = useFetchPlayers(currentRound);
+  
   // Update the state when data is loaded
   useEffect(() => {
     if (data) {
@@ -51,11 +62,12 @@ export default function App() {
   useEffect(() => {
     const intervalId = setInterval(() => {
       refetch();
+      refetchPlayers();
     }, 1000);
     
     // Clean up the interval when component unmounts
     return () => clearInterval(intervalId);
-  }, [refetch]);
+  }, [refetch, refetchPlayers]);
 
   // Update game state when data is loaded
   useEffect(() => {
@@ -63,10 +75,19 @@ export default function App() {
       setGameState(Number(gameStateData));
     }
   }, [gameStateData]);
-  
+
+  // Update current round when data is loaded
+  useEffect(() => {
+    if (currentRoundData !== undefined) {
+      setCurrentRound(Number(currentRoundData));
+    }
+  }, [currentRoundData]);
+
   // Check if the current user is registered
   useEffect(() => {
     if (!address || !players.length) return;
+
+    console.log(players);
     
     const userIsRegistered = players.some(player => 
       player.addr.toLowerCase() === address.toLowerCase()
@@ -269,8 +290,14 @@ export default function App() {
                  gameState === 2 ? 'Active' : 'Completed'}
               </span>
             </div>
+            
+            {/* Current Round */}
             <div className="text-sm mb-2">
-            <span className="font-medium">Total Players:</span> {players.length}
+              <span className="font-medium">Current Round:</span> {currentRound}
+            </div>
+            
+            <div className="text-sm mb-2">
+              <span className="font-medium">Total Players:</span> {players.length}
             </div>
             <div className="text-sm mb-4">
               <span className="font-medium">Alive Players:</span> {alivePlayers.length}
