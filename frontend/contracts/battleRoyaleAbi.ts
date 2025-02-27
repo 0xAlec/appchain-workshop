@@ -114,4 +114,42 @@ export const battleRoyaleAbi = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [
+      {
+        internalType: 'uint8',
+        name: 'direction',
+        type: 'uint8',
+      },
+    ],
+    name: 'submitMove',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      {
+        internalType: 'uint256',
+        name: 'targetX',
+        type: 'uint256',
+      },
+      {
+        internalType: 'uint256',
+        name: 'targetY',
+        type: 'uint256',
+      },
+    ],
+    name: 'submitAttack',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'submitDefend',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
 ] as const;

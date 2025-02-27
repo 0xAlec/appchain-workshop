@@ -1,8 +1,8 @@
 'use client';
 
-import { useReadContract, useAccount } from 'wagmi';
+import { useReadContract } from 'wagmi';
 import { useState, useEffect } from 'react';
-import client from './client';
+import client, { account } from './client';
 import { battleRoyaleAbi } from '../contracts/battleRoyaleAbi';
 import { useFetchPlayers } from './hooks/useFetchPlayers';
 const contractAddress = '0x61c36a8d610163660E21a8b7359e1Cac0C9133e1';
@@ -16,8 +16,12 @@ export default function App() {
   
   // Add these new states
   const [gameState, setGameState] = useState<number>(0); // 0=INACTIVE, 1=REGISTRATION, 2=ACTIVE, 3=COMPLETED
-  const { address } = useAccount();
+  const address = account.address;
   const [isRegistered, setIsRegistered] = useState(false);
+  
+  // Add state for action selection
+  const [selectedAction, setSelectedAction] = useState<string>('move');
+  const [selectedDirection, setSelectedDirection] = useState<number>(0); // 0: UP, 1: DOWN, 2: LEFT, 3: RIGHT
   
   // Read the game map
   const { data, isLoading, isError, refetch } = useReadContract({
@@ -68,6 +72,57 @@ export default function App() {
     );
     setIsRegistered(userIsRegistered);
   }, [address, players]);
+
+  // Function to handle player actions
+  const handleAction = async () => {
+    if (!address || !isRegistered || gameState !== 2 || !alivePlayers.includes(address)) {
+      console.log("Cannot perform action: game not active or player not eligible");
+      return;
+    }
+    
+    try {
+      if (selectedAction === 'move') {
+        await client.writeContract({
+          address: contractAddress,
+          abi: battleRoyaleAbi,
+          functionName: 'submitMove',
+          args: [selectedDirection],
+        });
+        console.log(`Submitted move in direction: ${['UP', 'DOWN', 'LEFT', 'RIGHT'][selectedDirection]}`);
+      } 
+      else if (selectedAction === 'attack') {
+        const playerData = players.find(p => p.addr.toLowerCase() === address.toLowerCase());
+        if (!playerData) return;
+        
+        // For simplicity, attack the cell in front of the player based on selected direction
+        let targetX = playerData.x;
+        let targetY = playerData.y;
+        
+        if (selectedDirection === 0) targetY = Math.max(0, playerData.y - 1); // UP
+        else if (selectedDirection === 1) targetY = Math.min(19, playerData.y + 1); // DOWN
+        else if (selectedDirection === 2) targetX = Math.max(0, playerData.x - 1); // LEFT
+        else if (selectedDirection === 3) targetX = Math.min(19, playerData.x + 1); // RIGHT
+        
+        await client.writeContract({
+          address: contractAddress,
+          abi: battleRoyaleAbi,
+          functionName: 'submitAttack',
+          args: [BigInt(targetX), BigInt(targetY)],
+        });
+        console.log(`Submitted attack at position: (${targetX}, ${targetY})`);
+      } 
+      else if (selectedAction === 'defend') {
+        await client.writeContract({
+          address: contractAddress,
+          abi: battleRoyaleAbi,
+          functionName: 'submitDefend',
+        });
+        console.log('Submitted defend action');
+      }
+    } catch (error) {
+      console.error('Error submitting action:', error);
+    }
+  };
 
   // Generate deterministic colors for players based on their addresses
   useEffect(() => {
@@ -131,14 +186,15 @@ export default function App() {
           {gameMap.length > 0 ? (
             <div className="grid gap-1" style={{ 
               display: 'grid', 
-              gridTemplateColumns: `repeat(${gameMap[0].length}, minmax(0, 1fr))` 
+              gridTemplateColumns: `repeat(${gameMap.length}, minmax(0, 1fr))` 
             }}>
-              {gameMap.map((row, x) => (
-                row.map((cell, y) => (
+              {/* Transpose the grid by swapping x and y coordinates */}
+              {Array.from({ length: gameMap[0].length }, (_, y) => (
+                gameMap.map((row, x) => (
                   <div 
                     key={`${x}-${y}`} 
-                    className={`w-8 h-8 border ${cell !== '0x0000000000000000000000000000000000000000' ? playerColors[cell] : 'bg-gray-200'}`}
-                    title={cell !== '0x0000000000000000000000000000000000000000' ? `Player: ${cell}` : 'Empty'}
+                    className={`w-8 h-8 border ${row[y] !== '0x0000000000000000000000000000000000000000' ? playerColors[row[y]] : 'bg-gray-200'}`}
+                    title={row[y] !== '0x0000000000000000000000000000000000000000' ? `Player: ${row[y]}` : 'Empty'}
                   />
                 ))
               ))}
@@ -195,7 +251,7 @@ export default function App() {
             <p className="text-sm text-gray-500 dark:text-gray-400">No players registered yet</p>
           )}
           
-          {/* Game state and registration section - moved here */}
+          {/* Game state and registration section */}
           <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
             <h3 className="text-lg font-semibold mb-3">Game Information</h3>
             
@@ -242,6 +298,98 @@ export default function App() {
                     : 'Registration Closed'}
             </button>
           </div>
+          
+          {/* Action Control Panel - New Section */}
+          {gameState === 2 && isRegistered && address && alivePlayers.includes(address) && (
+            <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <h3 className="text-lg font-semibold mb-3">Control Panel</h3>
+              
+              {/* Action Selection */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium mb-2">Select Action</label>
+                <div className="flex space-x-2">
+                  <button 
+                    onClick={() => setSelectedAction('move')}
+                    className={`px-3 py-1 rounded-md text-sm ${selectedAction === 'move' 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-gray-200 dark:bg-gray-700'}`}
+                  >
+                    Move
+                  </button>
+                  <button 
+                    onClick={() => setSelectedAction('attack')}
+                    className={`px-3 py-1 rounded-md text-sm ${selectedAction === 'attack' 
+                      ? 'bg-red-600 text-white' 
+                      : 'bg-gray-200 dark:bg-gray-700'}`}
+                  >
+                    Attack
+                  </button>
+                  <button 
+                    onClick={() => setSelectedAction('defend')}
+                    className={`px-3 py-1 rounded-md text-sm ${selectedAction === 'defend' 
+                      ? 'bg-green-600 text-white' 
+                      : 'bg-gray-200 dark:bg-gray-700'}`}
+                  >
+                    Defend
+                  </button>
+                </div>
+              </div>
+              
+              {/* Direction Selection (for Move and Attack) */}
+              {(selectedAction === 'move' || selectedAction === 'attack') && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium mb-2">Select Direction</label>
+                  <div className="grid grid-cols-3 gap-2 max-w-[150px] mx-auto">
+                    <div></div>
+                    <button 
+                      onClick={() => setSelectedDirection(0)}
+                      className={`p-2 rounded-md ${selectedDirection === 0 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-700'}`}
+                    >
+                      ↑
+                    </button>
+                    <div></div>
+                    <button 
+                      onClick={() => setSelectedDirection(2)}
+                      className={`p-2 rounded-md ${selectedDirection === 2 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-700'}`}
+                    >
+                      ←
+                    </button>
+                    <div></div>
+                    <button 
+                      onClick={() => setSelectedDirection(3)}
+                      className={`p-2 rounded-md ${selectedDirection === 3 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-700'}`}
+                    >
+                      →
+                    </button>
+                    <div></div>
+                    <button 
+                      onClick={() => setSelectedDirection(1)}
+                      className={`p-2 rounded-md ${selectedDirection === 1 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-700'}`}
+                    >
+                      ↓
+                    </button>
+                    <div></div>
+                  </div>
+                </div>
+              )}
+              
+              {/* Execute Action Button */}
+              <button 
+                onClick={handleAction}
+                className="w-full px-4 py-2 font-medium rounded-lg shadow-md transition duration-200 ease-in-out bg-purple-600 hover:bg-purple-700 text-white transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-opacity-50"
+              >
+                Execute {selectedAction.charAt(0).toUpperCase() + selectedAction.slice(1)}
+              </button>
+            </div>
+          )}
         </div>
       </main>
     </div>

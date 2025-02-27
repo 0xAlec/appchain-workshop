@@ -12,3 +12,4 @@ const client = createWalletClient({
 });
 
 export default client;
+export { account };
