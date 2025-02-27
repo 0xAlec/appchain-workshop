@@ -71,6 +71,7 @@ contract BattleRoyale {
     event GameEnded(uint256 indexed round, address indexed winner);
     event ActionsExecuted(uint256 indexed round, uint256 indexed blockNumber, uint256 actionsCount);
     event ActionSubmitted(uint256 indexed round, address indexed player, uint8 actionType);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
     
     // Modifiers
     modifier onlyOwner() {
@@ -97,6 +98,16 @@ contract BattleRoyale {
         owner = msg.sender;
         gameState = GameState.INACTIVE;
         currentRound = 0;
+    }
+    
+    /**
+     * @dev Transfer ownership of the contract
+     * @param _newOwner New owner address
+     */
+    function transferOwnership(address _newOwner) external onlyOwner {
+        require(_newOwner != address(0), "Invalid address");
+        emit OwnershipTransferred(owner, _newOwner);
+        owner = _newOwner;
     }
     
     /**

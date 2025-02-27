@@ -37,6 +37,13 @@ contract BattleRoyaleFactory {
         // Deploy battle royale contract
         BattleRoyale newGame = new BattleRoyale();
         
+        // Transfer ownership of the game to the deployer
+        // Use a low-level call to avoid interface issues
+        (bool success, ) = address(newGame).call(
+            abi.encodeWithSignature("transferOwnership(address)", msg.sender)
+        );
+        require(success, "Ownership transfer failed");
+        
         // Deploy rewards contract
         BattleRoyaleRewards newRewards = new BattleRoyaleRewards(address(newGame));
         
