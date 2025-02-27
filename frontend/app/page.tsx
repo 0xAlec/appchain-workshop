@@ -237,6 +237,7 @@ export default function App() {
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Address</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
                     <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">HP</th>
+                    <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Position</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -261,6 +262,9 @@ export default function App() {
                       </td>
                       <td className="px-2 py-2 text-xs">
                         {alivePlayers.includes(player.addr) ? player.health : '0'}
+                      </td>
+                      <td className="px-2 py-2 text-xs">
+                        {alivePlayers.includes(player.addr) ? `(${player.x}, ${player.y})` : '-'}
                       </td>
                     </tr>
                   ))}
