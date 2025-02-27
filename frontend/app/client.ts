@@ -1,4 +1,4 @@
-import { createWalletClient, http } from 'viem';
+import { createPublicClient, createWalletClient, http } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { SANDBOX_CHAIN } from './chain';
 
@@ -11,5 +11,10 @@ const client = createWalletClient({
   transport: http(),
 });
 
+const publicClient = createPublicClient({
+  chain: SANDBOX_CHAIN,
+  transport: http(),
+});
+
 export default client;
-export { account };
+export { account, publicClient };
