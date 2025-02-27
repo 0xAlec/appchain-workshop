@@ -5,12 +5,13 @@ import { useState, useEffect } from 'react';
 import client, { account } from './client';
 import { battleRoyaleAbi } from '../contracts/battleRoyaleAbi';
 import { useFetchPlayers } from './hooks/useFetchPlayers';
-const contractAddress = '0x61c36a8d610163660E21a8b7359e1Cac0C9133e1';
+import { contractAddress } from './constants';
 
 export default function App() {
   // State to store the game map
   const [gameMap, setGameMap] = useState<string[][]>([]);
   const { players, alivePlayers } = useFetchPlayers();
+
   // Add state for player colors
   const [playerColors, setPlayerColors] = useState<Record<string, string>>({});
 
@@ -85,7 +86,7 @@ export default function App() {
         await client.writeContract({
           address: contractAddress,
           abi: battleRoyaleAbi,
-          functionName: 'submitMove',
+          functionName: 'move',
           args: [selectedDirection],
         });
         console.log(`Submitted move in direction: ${['UP', 'DOWN', 'LEFT', 'RIGHT'][selectedDirection]}`);
@@ -106,7 +107,7 @@ export default function App() {
         await client.writeContract({
           address: contractAddress,
           abi: battleRoyaleAbi,
-          functionName: 'submitAttack',
+          functionName: 'attack',
           args: [BigInt(targetX), BigInt(targetY)],
         });
         console.log(`Submitted attack at position: (${targetX}, ${targetY})`);
@@ -115,7 +116,7 @@ export default function App() {
         await client.writeContract({
           address: contractAddress,
           abi: battleRoyaleAbi,
-          functionName: 'submitDefend',
+          functionName: 'defend',
         });
         console.log('Submitted defend action');
       }

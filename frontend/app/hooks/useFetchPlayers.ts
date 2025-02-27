@@ -2,9 +2,7 @@ import { useConfig, useReadContract } from 'wagmi';
 import { useState, useEffect } from 'react';
 import { battleRoyaleAbi } from '../../contracts/battleRoyaleAbi';
 import { readContract } from 'wagmi/actions';
-
-// Contract address from your configuration
-const contractAddress = '0x61c36a8d610163660E21a8b7359e1Cac0C9133e1';
+import { contractAddress } from '../constants';
 
 interface Player {
   addr: string;
@@ -13,7 +11,6 @@ interface Player {
   health: number;
   lastActionBlock: number;
   isAlive: boolean;
-  actionSubmittedForBlock: boolean;
 }
 
 interface UseFetchPlayersResult {
@@ -92,7 +89,6 @@ export function useFetchPlayers(
           health: Number(player.health),
           lastActionBlock: Number(player.lastActionBlock),
           isAlive: player.isAlive,
-          actionSubmittedForBlock: player.actionSubmittedForBlock,
         }));
 
         setPlayers(formattedPlayers);
