@@ -86,8 +86,6 @@ export default function App() {
   // Check if the current user is registered
   useEffect(() => {
     if (!address || !players.length) return;
-
-    console.log(players);
     
     const userIsRegistered = players.some(player => 
       player.addr.toLowerCase() === address.toLowerCase()
